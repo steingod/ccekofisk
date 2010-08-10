@@ -1,0 +1,191 @@
+#!/usr/bin/perl -w
+#
+# NAME:
+# ccekofisk
+#
+# PURPOSE:
+# To concatenate radiation files from Ekofisk to a single large file and
+# to create a NetCDF/CF file of the full file.
+#
+# REQUIREMENTS:
+# NA
+#
+# INPUT:
+# NA
+#
+# OUTPUT:
+# NA
+#
+# NOTES:
+# NA
+#
+# BUGS:
+# NA
+#
+# AUTHOR:
+# Øystein Godøy, METNO/FOU, 14.04.2009
+#
+# MODIFIED:
+# NA
+#
+# CVS_ID:
+# $Id: ccekofisk,v 1.1 2010-08-10 09:11:29 steingod Exp $
+#
+
+use strict;
+use fmutil;
+use Date::Parse;
+##use Time::Local;
+use POSIX qw(strftime);
+use PDL;
+use PDL::Char;
+use PDL::NetCDF;
+
+my $indir = "/disk1/data/radflux/Ekofisk";
+my $outfile = $indir."/radflux_ekofisk.txt";
+my $keyw = "Ekofisk_";
+my(@dc,@fc,@ad,$filename,$item,$ncid);
+my(@year,@doy,@mytime,@glob,@long,@uvmed,@tempuv,@templong,@volt,@tmp);
+
+sub year_and_day2epoch;
+
+# Read directory content
+@dc = sort(fm_read_dir($indir,$keyw));
+
+# Concatenate files
+foreach $filename (sort(@dc)) {
+    print "$filename\n";
+    open(FH,"$indir/$filename") || die "Can't open $indir/$filename";
+    @fc = <FH>;
+    close(FH);
+    foreach $item (@fc) {
+	$item =~ s/,/ /g;
+	$item =~ s/ \./ 0\./g;
+	$item =~ s/ -\./ -0\./g;
+	unless ($item =~ /\n/) {$item .= "\n"};
+	push @ad,$item;
+	$item =~ s/\n//;
+	@tmp = split / /,$item;
+	#push @year,$tmp[1];
+	#push @doy,$tmp[2];
+	#push @mytime,$tmp[3];
+
+	push @mytime,year_and_day2epoch($tmp[1],$tmp[2],$tmp[3]);
+	push @glob,$tmp[4];
+	push @long,$tmp[5];
+	push @uvmed,$tmp[6];
+	push @tempuv,$tmp[7];
+	push @templong,$tmp[8];
+	push @volt,$tmp[9];
+    }
+}
+
+# Create concatenated text file
+open(FH,">$outfile") || die "Can't create output file $outfile";
+print FH "# Code Year DoY Time(GMT) SSI(W/m^2) DLI(W/m^2) UV(Med) TUV(C) TPY(C) U(V)\n";
+print FH @ad;
+close(FH);
+
+# Create netCDF/CF file...
+$outfile =~ s/\.txt/\.nc/;
+$ncid = PDL::NetCDF->new(">$outfile");
+# Global attributes
+$ncid->putatt("CF- 1.4","Conventions");
+$ncid->putatt(strftime("%F %T UTC",gmtime($mytime[0])),"start_date");
+$ncid->putatt(strftime("%F %T UTC",gmtime($mytime[$#mytime])),"stop_date");
+$ncid->putatt("2009-04-14 creation","history");
+$ncid->putatt("Radiative observations at Ekofisk","title");
+$ncid->putatt("Not available","abstract");
+$ncid->putatt("Jan Asle Olseth","PI_name");
+$ncid->putatt("olseth\@gfi.uib.no","contact");
+$ncid->putatt("University of Bergen","institution");
+$ncid->putatt("http://www.uib.no/gfi/forskning/maaleaktivitet/maaleaktiviteter/straalingsobservatoriet","url");
+$ncid->putatt("Not available","project_name");
+$ncid->putatt("Ekofisk oil rig","Platform_name");
+$ncid->putatt("ClimatologyMeteorologyAtmosphere","topiccategory");
+$ncid->putatt("Radiative Flux","keywords");
+$ncid->putatt("Atmosphere > Atmospheric Radiation > Shortwave Radiation\nAtmosphere > Atmospheric Radiation > Longwave Radiation","gcmd_keywords");
+$ncid->putatt(double([56.5]),"southernmost_latitude");
+$ncid->putatt(double([56.5]),"northernmost_latitude");
+$ncid->putatt(double([3.2]),"westernmost_longitude");
+$ncid->putatt(double([3.2]),"easternmost_longitude");
+$ncid->putatt("Quality controlled","quality_statement");
+$ncid->putatt("Restricted to iAOOS-Norway","distribution_statement");
+
+# Variables
+$ncid->put('time',['time'],pdl(@mytime));
+$ncid->putatt("time","standard_name","time");
+$ncid->putatt("time of the observation (centered)","long_name","time");
+$ncid->putatt("seconds since 1970-01-01 00:00:00 UTC","units","time");
+$ncid->putatt("T","axis","time");
+
+#$ncid->put('stationid',['stationid','strlen25'],PDL::Char->new(["Ekofisk Oil Rig"]));
+
+$ncid->put('latitude',['latitude'],pdl([56.5]));
+$ncid->putatt("latitude","standard_name","latitude");
+$ncid->putatt("degree_east","units","latitude");
+$ncid->putatt(pdl([-90.]),"valid_min","latitude");
+$ncid->putatt(double([90.]),"valid_max","latitude");
+
+$ncid->put('longitude',['longtitude'],pdl([3.2]));
+$ncid->putatt("longitude","standard_name","longitude");
+$ncid->putatt("degree_east","units","longitude");
+$ncid->putatt(pdl([-180.]),"valid_min","longitude");
+$ncid->putatt(double([180.]),"valid_max","longitude");
+
+$ncid->put('ssi',['time'],pdl(@glob));
+$ncid->putatt("surface_downwelling_shortwave_flux","standard_name","ssi");
+$ncid->putatt("shortwave irradiation at the surface","long_name","ssi");
+$ncid->putatt("watts/meter2","units","ssi");
+$ncid->putatt(double([-999.]),"_FillValue","ssi");
+$ncid->putatt("time: mean (ten minutes)","cell_method","ssi");
+
+$ncid->put('dli',['time'],pdl(@long));
+$ncid->putatt("surface_net_downward_longwave_flux","standard_name","dli");
+$ncid->putatt("difference between downward atmospheric longwave irradiation and emitted CGR4 irradiance","long_name","dli");
+$ncid->putatt("watts/meter2","units","dli");
+$ncid->putatt(double([-999.]),"_FillValue","dli");
+$ncid->putatt("time: mean (ten minutes)","cell_method","dli");
+
+$ncid->put("dlisenstemp",["time"],pdl(@templong));
+$ncid->putatt("temperature of the surface longwave irradiation sensor","long_name","dlisenstemp");
+$ncid->putatt(double([-999.]),"_FillValue","dlisenstemp");
+$ncid->putatt("degC","units","dlisenstemp");
+$ncid->putatt("time: mean (ten minutes)","cell_method","dlisenstemp");
+
+$ncid->put("uvmed",["time"],pdl(@uvmed));
+$ncid->putatt("Ultraviolet radiation MED/hour","long_name","uvmed");
+$ncid->putatt(double([-999.]),"_FillValue","uvmed");
+#$ncid->putatt("MED/h","units","uvmed");
+$ncid->putatt("time: mean (ten minutes)","cell_method","uvmed");
+
+$ncid->put("battery",["time"],pdl(@volt));
+$ncid->putatt("minimum battery voltage","long_name","battery");
+$ncid->putatt(double([-999.]),"_FillValue","battery");
+$ncid->putatt("V","units","battery");
+$ncid->putatt("time: mean (ten minutes)","cell_method","battery");
+
+$ncid->close();
+
+exit;
+
+sub year_and_day2epoch($$$) {
+    my($myyear,$myday,$mytime) = @_;
+    my($timeepoch,$timestr,$decimh);
+
+    $timestr = sprintf "%4d-01-01 00:00 GMT", $myyear;
+
+    $timeepoch = str2time($timestr);
+    $myday -= 1;
+    $myday *= (24*3600.);
+
+    $timeepoch += int($myday);
+
+    $mytime /= 100.;
+    $decimh = int($mytime)+($mytime-int($mytime))/60.;
+
+    $timeepoch += ($decimh*3600.);
+
+    return($timeepoch);
+}
+

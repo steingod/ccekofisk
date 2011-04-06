@@ -29,7 +29,7 @@
 # NA
 #
 # CVS_ID:
-# $Id: ccekofisk,v 1.1 2010-08-10 09:11:29 steingod Exp $
+# $Id: ccekofisk,v 1.2 2011-04-06 11:50:26 steingod Exp $
 #
 
 use strict;
@@ -182,7 +182,7 @@ sub year_and_day2epoch($$$) {
     $timeepoch += int($myday);
 
     $mytime /= 100.;
-    $decimh = int($mytime)+($mytime-int($mytime))/60.;
+    $decimh = int($mytime)+((($mytime-int($mytime))*100)/60.);
 
     $timeepoch += ($decimh*3600.);
 
